@@ -6,9 +6,7 @@ Set a work timer. Every 20 minutes, Respite nudges you to look away for 20 secon
 
 ## Demo
 
-[Watch the demo video](assets/respite-demo.mp4)
-
-<video src="assets/respite-demo.mp4" controls width="720"></video>
+![Respite demo](assets/respite-demo.gif)
 
 ---
 
