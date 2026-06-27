@@ -4,6 +4,10 @@ A minimal macOS menu bar app that keeps your eyes healthy during long work sessi
 
 Set a work timer. Every 20 minutes, Respite nudges you to look away for 20 seconds. When your screen locks or sleeps, timers pause automatically. When you're back, they resume — no lost time.
 
+## Demo
+
+<video src="assets/respite-demo.mp4" controls width="720"></video>
+
 ---
 
 ## Install
