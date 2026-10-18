@@ -1,24 +1,31 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "Installing Respite..."
+echo "Installing Work Timer..."
 
 REPO="hgpt185/worktimer"
-DMG_URL="https://github.com/$REPO/raw/main/Respite.dmg"
-TMP_DMG="/tmp/Respite.dmg"
+DMG_URL="https://github.com/$REPO/raw/main/Work%20Timer.dmg"
+INSTALL_TMP=$(mktemp -d)
+MOUNT_DIR="$INSTALL_TMP/mount"
+cleanup() {
+    if mount | grep -Fq " on $MOUNT_DIR ("; then
+        hdiutil detach "$MOUNT_DIR" -quiet || true
+    fi
+    rm -rf "$INSTALL_TMP"
+}
+trap cleanup EXIT
+mkdir "$MOUNT_DIR"
 
-curl -L -o "$TMP_DMG" "$DMG_URL"
+curl -fL -o "$INSTALL_TMP/Work Timer.dmg" "$DMG_URL"
+hdiutil attach "$INSTALL_TMP/Work Timer.dmg" -nobrowse -readonly -mountpoint "$MOUNT_DIR" -quiet
 
-MOUNT_DIR=$(hdiutil attach "$TMP_DMG" -nobrowse | grep "/Volumes" | awk '{print $NF}')
-
-rm -rf "/Applications/Respite.app"
-cp -R "$MOUNT_DIR/Respite.app" /Applications/
-
-hdiutil detach "$MOUNT_DIR" -quiet
-rm -f "$TMP_DMG"
+if pgrep -x "Work Timer" >/dev/null; then
+    osascript -e 'tell application "Work Timer" to quit'
+fi
+ditto "$MOUNT_DIR/Work Timer.app" "/Applications/Work Timer.app"
 
 echo ""
-echo "Respite installed to /Applications/Respite.app"
+echo "Work Timer installed to /Applications/Work Timer.app"
 echo "Launching..."
-open /Applications/Respite.app
+open "/Applications/Work Timer.app"
 echo "Done. Look for the ⏳ in your menu bar."

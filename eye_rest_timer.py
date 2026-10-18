@@ -8,9 +8,13 @@ Eye Rest Timer — macOS menu bar app
 
 import rumps
 import objc
-from Foundation import NSDistributedNotificationCenter, NSObject
+from Foundation import (
+    NSDistributedNotificationCenter, NSObject, NSTimer, NSRunLoop, NSDefaultRunLoopMode,
+)
 from AppKit import NSWorkspace, NSWorkspaceScreensDidSleepNotification, NSWorkspaceScreensDidWakeNotification
 import subprocess
+import math
+import time
 
 
 def send_notification(title, message):
@@ -31,24 +35,24 @@ class ScreenStateObserver(NSObject):
 
     def screenLocked_(self, notification):
         if self.on_lock:
-            self.on_lock()
+            self.on_lock("locked")
 
     def screenUnlocked_(self, notification):
         if self.on_unlock:
-            self.on_unlock()
+            self.on_unlock("locked")
 
     def screenSlept_(self, notification):
         if self.on_lock:
-            self.on_lock()
+            self.on_lock("asleep")
 
     def screenWoke_(self, notification):
         if self.on_unlock:
-            self.on_unlock()
+            self.on_unlock("asleep")
 
 
 class EyeRestTimerApp(rumps.App):
     def __init__(self):
-        super().__init__("Respite", title="⏳ Start Timer")
+        super().__init__("Work Timer", title="⏳ Start Timer")
 
         self.eye_rest_interval = 20 * 60  # 20 minutes
         self.eye_rest_remaining = self.eye_rest_interval
@@ -59,7 +63,10 @@ class EyeRestTimerApp(rumps.App):
         self.session_remaining = 0
         self.session_active = False
 
-        self.paused = False
+        self.paused = False  # Manual pause, independent of screen state.
+        self._inactive_reasons = set()
+        self._last_active_time = None
+        self._timer = None
 
         self.menu = [
             rumps.MenuItem("Start Timer...", callback=self.start_session),
@@ -102,16 +109,46 @@ class EyeRestTimerApp(rumps.App):
             None
         )
 
-    def _on_screen_inactive(self):
-        self.paused = True
-        self.menu["Status: Idle"].title = "Status: PAUSED (screen off)"
+    def _on_screen_inactive(self, reason="screen"):
+        self._advance()
+        self._inactive_reasons.add(reason)
+        self._refresh()
 
-    def _on_screen_active(self):
-        self.paused = False
-        if self.session_active:
-            self.menu["Status: Idle"].title = "Status: Running"
-        else:
+    def _on_screen_active(self, reason="screen"):
+        self._advance()
+        self._inactive_reasons.discard(reason)
+        self._refresh()
+
+    def _running(self):
+        return self.session_active and not self.paused and not self._inactive_reasons
+
+    def _cancel_timer(self):
+        if self._timer is not None:
+            self._timer.invalidate()
+            self._timer = None
+
+    def _set_title(self, title):
+        if self.title != title:
+            self.title = title
+
+    def _refresh(self):
+        self._cancel_timer()
+        self.menu["Pause"].title = "Resume" if self.paused else "Pause"
+        if not self.session_active:
+            self._last_active_time = None
             self.menu["Status: Idle"].title = "Status: Idle"
+            return
+        if not self._running():
+            self._last_active_time = None
+            status = "PAUSED" if self.paused else "PAUSED (screen off)"
+            self.menu["Status: Idle"].title = f"Status: {status}"
+            self._set_title("⏸ Paused")
+            return
+        self.menu["Status: Idle"].title = "Status: Running"
+        if self._last_active_time is None:
+            self._last_active_time = time.monotonic()
+        self._update_title()
+        self._schedule()
 
     def start_session(self, _):
         window = rumps.Window(
@@ -128,18 +165,20 @@ class EyeRestTimerApp(rumps.App):
 
         text = response.text.strip().lower()
         minutes = self._parse_duration(text)
-        if minutes is None or minutes <= 0:
+        if minutes is None or not math.isfinite(minutes) or minutes <= 0:
             rumps.alert("Invalid input", "Enter a number like: 360, 6h, 1.5h, or 90m")
             return
 
-        self.session_total = int(minutes * 60)
+        self._cancel_timer()
+        self._last_active_time = None
+        self.session_total = max(1, int(minutes * 60))
         self.session_remaining = self.session_total
         self.session_active = True
         self.paused = False
         self.eye_rest_remaining = self.eye_rest_interval
         self.eye_resting = False
-        self.menu["Pause"].title = "Pause"
-        self.menu["Status: Idle"].title = "Status: Running"
+        self.eye_rest_pause_remaining = 20
+        self._refresh()
 
         hours = minutes / 60
         if hours >= 1:
@@ -161,73 +200,98 @@ class EyeRestTimerApp(rumps.App):
     def toggle_pause(self, sender):
         if not self.session_active:
             return
-        self.paused = not self.paused
-        if self.paused:
-            sender.title = "Resume"
-            self.menu["Status: Idle"].title = "Status: PAUSED"
-            self.title = "⏸ Paused"
-        else:
-            sender.title = "Pause"
-            self.menu["Status: Idle"].title = "Status: Running"
+        self._advance()
+        if self.session_active:
+            self.paused = not self.paused
+        self._refresh()
 
     def stop_session(self, _):
+        self._cancel_timer()
+        self._last_active_time = None
         self.session_active = False
         self.session_remaining = 0
         self.eye_resting = False
         self.paused = False
-        self.title = "⏳ Start Timer"
-        self.menu["Pause"].title = "Pause"
-        self.menu["Status: Idle"].title = "Status: Idle"
+        self._set_title("⏳ Start Timer")
+        self._refresh()
 
-    @rumps.timer(1)
-    def tick(self, _):
-        if self.paused or not self.session_active:
+    def _advance(self):
+        if not self._running() or self._last_active_time is None:
             return
-
-        # Session countdown
-        self.session_remaining -= 1
+        now = time.monotonic()
+        elapsed = max(0, now - self._last_active_time)
+        self._last_active_time = now
+        self.session_remaining = max(0, self.session_remaining - elapsed)
+        # Session completion wins, including when a callback was delayed.
         if self.session_remaining <= 0:
             self.session_active = False
+            self.eye_resting = False
+            self.paused = False
+            self._cancel_timer()
+            self._last_active_time = None
+            self._set_title("⏳ Done!")
             send_notification("Session Complete!", f"Your {self.session_total // 3600}h session is done. Take a break!")
-            self.title = "⏳ Done!"
-            self.menu["Status: Idle"].title = "Status: Idle"
             return
 
-        # Eye rest logic
-        if self.eye_resting:
-            self.eye_rest_pause_remaining -= 1
-            if self.eye_rest_pause_remaining <= 0:
-                send_notification("Rest Over", "You can look back at the screen now.")
+        while elapsed > 0:
+            remaining = self.eye_rest_pause_remaining if self.eye_resting else self.eye_rest_remaining
+            consumed = min(elapsed, remaining)
+            elapsed -= consumed
+            remaining -= consumed
+            if self.eye_resting:
+                self.eye_rest_pause_remaining = remaining
+            else:
+                self.eye_rest_remaining = remaining
+            if remaining > 0:
+                break
+            if self.eye_resting:
                 self.eye_resting = False
                 self.eye_rest_remaining = self.eye_rest_interval
-        else:
-            self.eye_rest_remaining -= 1
-            if self.eye_rest_remaining <= 0:
-                send_notification("Eye Rest", "Look at something 20 feet away for 20 seconds.")
+                send_notification("Rest Over", "You can look back at the screen now.")
+            else:
                 self.eye_resting = True
                 self.eye_rest_pause_remaining = 20
+                send_notification("Eye Rest", "Look at something 20 feet away for 20 seconds.")
 
-        self._update_title()
+    def tick(self, timer):
+        # Ignore callbacks already queued before a pause, stop, or restart.
+        if timer is not self._timer:
+            return
+        self._cancel_timer()
+        self._advance()
+        self._refresh()
+
+    @staticmethod
+    def _until_display_change(remaining, unit):
+        return remaining - (math.ceil(remaining / unit) - 1) * unit
+
+    def _schedule(self):
+        delays = [self.session_remaining,
+                  self._until_display_change(self.session_remaining, 60)]
+        if self.eye_resting:
+            delays.append(self._until_display_change(self.eye_rest_pause_remaining, 1))
+        else:
+            remaining = self.eye_rest_remaining
+            if remaining > 30:
+                delays.extend([remaining - 30, self._until_display_change(remaining, 60)])
+            else:
+                delays.append(self._until_display_change(remaining, 1))
+        self._timer = NSTimer.timerWithTimeInterval_repeats_block_(
+            max(0.001, min(delays)), False, lambda timer: self.tick(timer)
+        )
+        NSRunLoop.currentRunLoop().addTimer_forMode_(self._timer, NSDefaultRunLoopMode)
 
     def _update_title(self):
-        if self.paused:
-            self.title = "⏸"
-            return
-
-        # Show session remaining time
-        h, remainder = divmod(self.session_remaining, 3600)
-        m, s = divmod(remainder, 60)
-
+        minutes = math.ceil(self.session_remaining / 60)
+        h, m = divmod(minutes, 60)
+        session_part = f"{h}h {m:02d}m" if h else f"{m}m"
         if self.eye_resting:
-            rest_part = f"REST {self.eye_rest_pause_remaining}s"
+            rest_part = f"REST {math.ceil(self.eye_rest_pause_remaining)}s"
+        elif self.eye_rest_remaining <= 30:
+            rest_part = f"{math.ceil(self.eye_rest_remaining)}s"
         else:
-            rest_m, rest_s = divmod(self.eye_rest_remaining, 60)
-            rest_part = f"{rest_m}:{rest_s:02d}"
-
-        if h > 0:
-            self.title = f"⏳ {h}:{m:02d}:{s:02d} | {rest_part}"
-        else:
-            self.title = f"⏳ {m}:{s:02d} | {rest_part}"
+            rest_part = f"{math.ceil(self.eye_rest_remaining / 60)}m"
+        self._set_title(f"⏳ {session_part} | {rest_part}")
 
 
 if __name__ == "__main__":

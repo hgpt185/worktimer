@@ -1,12 +1,12 @@
-# Respite
+# Work Timer
 
 A minimal macOS menu bar app that keeps your eyes healthy during long work sessions.
 
-Set a work timer. Every 20 minutes, Respite nudges you to look away for 20 seconds. When your screen locks or sleeps, timers pause automatically. When you're back, they resume — no lost time.
+Set a work timer. Every 20 minutes, Work Timer nudges you to look away for 20 seconds. When your screen locks or sleeps, timers pause automatically. When you're back, they resume — no lost time.
 
 ## Demo
 
-[![Respite demo](assets/respite-demo.gif)](assets/respite-demo.mp4)
+[![Work Timer demo](assets/work-timer-demo.gif)](assets/work-timer-demo.mp4)
 
 Click the preview to watch the full-resolution video.
 
@@ -20,13 +20,13 @@ Click the preview to watch the full-resolution video.
 curl -fsSL https://raw.githubusercontent.com/hgpt185/worktimer/main/install.sh | bash
 ```
 
-This downloads the DMG, copies `Respite.app` to `/Applications`, and launches it.
+This downloads the DMG, copies `Work Timer.app` to `/Applications`, and launches it.
 
 **Manual:**
 
-1. Download `Respite.dmg` from [Releases](https://github.com/hgpt185/worktimer)
-2. Open the DMG and drag `Respite.app` to `/Applications`
-3. Launch from Spotlight or `open /Applications/Respite.app`
+1. Download `Work Timer.dmg` from [the repository](https://github.com/hgpt185/worktimer/blob/main/Work%20Timer.dmg)
+2. Open the DMG and drag `Work Timer.app` to `/Applications`
+3. Launch from Spotlight or `open "/Applications/Work Timer.app"`
 
 ---
 
@@ -41,11 +41,12 @@ This downloads the DMG, copies `Respite.app` to `/Applications`, and launches it
 **Menu bar display:**
 
 ```
-⏳ 5:42:01 | 18:30
-│          │
-│          └── Next eye-rest break in 18min 30s
-└── Session time remaining
+⏳ 5h 42m | 18m
+⏳ 42m | 30s
+⏳ 42m | REST 20s
 ```
+
+Session and break minutes round up. The break countdown shows seconds for the final 30 seconds, then `REST 20s` through `REST 1s`. Session time continues counting during rest.
 
 **Notifications:**
 - "Look at something 20 feet away for 20 seconds" — every 20 min
@@ -59,6 +60,9 @@ This downloads the DMG, copies `Respite.app` to `/Applications`, and launches it
 - Follows the **20-20-20 rule**: every 20 minutes, look at something 20 feet away for 20 seconds
 - Listens to `com.apple.screenIsLocked` / `screenIsUnlocked` and `NSWorkspaceScreensDidSleep/Wake`
 - All countdowns freeze when your Mac is locked or asleep — only active screen time counts
+- Manual pause stays paused through lock/unlock and sleep/wake
+- Uses monotonic elapsed time and schedules callbacks only for the next display change or timer event; no callbacks while idle or paused
+- Updates the menu bar title only when its text changes
 - Lives in the menu bar only (no Dock icon)
 - Native macOS notifications with sound
 
@@ -77,7 +81,7 @@ pip install -r requirements.txt py2app
 python setup.py py2app
 ```
 
-The built app is at `dist/Respite.app`.
+The built app is at `dist/Work Timer.app`.
 
 **Run without building:**
 
@@ -86,11 +90,19 @@ source .venv/bin/activate
 python eye_rest_timer.py
 ```
 
+**Run timer logic tests (no macOS UI dependencies required):**
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+The tests use a simulated monotonic clock. Native notifications, screen events, and Activity Monitor energy readings require manual verification on macOS.
+
 ---
 
 ## Auto-start at Login
 
-System Settings → General → Login Items → add `/Applications/Respite.app`
+System Settings → General → Login Items → add `/Applications/Work Timer.app`
 
 ---
 

@@ -10,8 +10,10 @@ OPTIONS = {
     'argv_emulation': False,
     'iconfile': None,
     'plist': {
-        'CFBundleName': 'Respite',
-        'CFBundleShortVersionString': '1.0.0',
+        'CFBundleName': 'Work Timer',
+        'CFBundleDisplayName': 'Work Timer',
+        'CFBundleIdentifier': 'com.hgpt185.worktimer',
+        'CFBundleShortVersionString': '1.0.1',
         'LSUIElement': True,  # Hide from Dock (menu bar only)
         'NSAppleEventsUsageDescription': 'Required for notifications.',
     },
@@ -19,6 +21,8 @@ OPTIONS = {
 }
 
 setup(
+    name='Work Timer',
+    version='1.0.1',
     app=APP,
     data_files=DATA_FILES,
     options={'py2app': OPTIONS},
